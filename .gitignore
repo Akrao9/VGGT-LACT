@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# Local datasets, downloads, and generated outputs
+/content/
+/dl3dv_temp/
+/checkpoints/
+/output/
+/outputs/
+vggtttt_*_out/
+vggtttt_*_decoder*/
+
+# Large model artifacts
+*.pt
+*.pth
+*.ckpt
+*.safetensors

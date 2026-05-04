@@ -1,0 +1,23 @@
+[project]
+name = "vggt-ttt"
+version = "0.1.0"
+description = "VGGT with LaCT test-time training and Gaussian decoder experiments"
+requires-python = ">=3.10"
+dependencies = [
+  "torch",
+  "torchvision",
+  "vggt @ git+https://github.com/facebookresearch/vggt.git",
+  "numpy",
+  "pandas",
+  "pillow",
+  "tqdm",
+  "huggingface_hub",
+  "safetensors",
+  "transformers",
+  "gsplat",
+  "pytorch-msssim",
+  "piq",
+]
+
+[tool.setuptools]
+packages = ["model", "pipeline"]

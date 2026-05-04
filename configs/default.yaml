@@ -1,0 +1,42 @@
+# Reference defaults (CLI scripts use argparse; this file is documentation only).
+model:
+  vggt_id: facebook/VGGT-1B
+  lact_dim: 1024
+  lact_heads: 16
+  fast_weight_lr: 1.0e-3
+  chunk_size: 1
+  lact_ttt_update_cap: 256
+  lact_ttt_apply_cap: 512
+  share_frame_blocks: true
+  tbptt_window: 0
+  grad_ckpt: false
+
+input:
+  target_size: 518
+  fps: 2.0
+  max_frames: 300
+
+train_stage1:
+  epochs: 5
+  lr: 1.0e-4
+  batch_size: 1
+  seq_len: 32
+  grad_accum_steps: 1  # finetune.py; does not lower peak VRAM per forward—SDP/allocator via configure_cuda_backend
+  precision: bf16
+  num_workers_local: 16
+  num_workers_stream: 8
+
+train_stage2:
+  epochs: 10
+  lr: 5.0e-5
+  batch_size: 1
+  seq_len: 96
+  grad_accum_steps: 1  # same VRAM note as train_stage1
+  precision: bf16
+
+decoder:
+  hidden_dim: 256
+  virtual_grid: 24
+  n_source: 16
+  n_target: 4
+  lr: 2.0e-4
