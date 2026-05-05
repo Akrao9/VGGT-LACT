@@ -59,6 +59,8 @@ images ── DINOv2 patch embed (frozen) ──┐
 | `pipeline/input_pipeline.py` | Image/video preprocessing |
 | `scripts/script_common.py` | CUDA defaults (TF32, fused AdamW, compile guard, AMP helpers) |
 | `scripts/run_inference.py` | Inference CLI (video → poses / depth / points) |
+| `scripts/upload_vggt_lact_hf.py` | Upload LaCT checkpoint + Hub model card to [`akrao9/VGGT-LACT`](https://huggingface.co/akrao9/VGGT-LACT) |
+| `huggingface/VGGT-LACT/README.md` | Model card source for the Hub repo above |
 | `scripts/benchmark_vs_vggt.py` | Teacher vs student: VRAM, latency, depth vs teacher, pose vs GT |
 | `scripts/finetune.py` | Stage 1 distillation or stage 2 consistency training |
 | `scripts/dl3dv_streaming.py` | DL3DV HF tar streaming helpers for `finetune.py` |
@@ -69,7 +71,7 @@ images ── DINOv2 patch embed (frozen) ──┐
 ## Install
 
 ```bash
-git clone https://github.com/Akrao9/VGGT-LACT && cd VGGT-LACT
+git clone https://github.com/Akrao9/vggt_ttt && cd vggt_ttt
 pip install -e .
 ```
 
@@ -77,14 +79,21 @@ Install [VGGT](https://github.com/facebookresearch/vggt) separately (the model l
 
 ## Inference
 
+**Pretrained LaCT (stage 1)** lives on the Hub: [`akrao9/VGGT-LACT`](https://huggingface.co/akrao9/VGGT-LACT) (`vggt_ttt_lact_stage1.pt`, ~200 MB). Example download:
+
+```python
+from huggingface_hub import hf_hub_download
+ckpt = hf_hub_download("akrao9/VGGT-LACT", "vggt_ttt_lact_stage1.pt")
+```
+
 ```bash
 python scripts/run_inference.py \
     --input my_video.mp4 --fps 2 \
-    --lact_ckpt /path/to/vggt_ttt_lact_stage1.pt \
+    --checkpoint /path/to/vggt_ttt_lact_stage1.pt \
     --out ./out
 ```
 
-The slim LaCT checkpoint (~200 MB) is loaded on top of `facebook/VGGT-1B`; everything else (frame-wise blocks, prediction heads) comes from the public VGGT release.
+The slim LaCT checkpoint is loaded on top of `facebook/VGGT-1B`; everything else (frame-wise blocks, prediction heads) comes from the public VGGT release.
 
 ## Training (stage 1 distillation)
 
@@ -201,3 +210,4 @@ This project is released under the **Apache License, Version 2.0**. The full tex
 - tttLRM — https://cwchenwang.github.io/tttLRM/
 - DL3DV-Evaluation — https://huggingface.co/datasets/DL3DV/DL3DV-Evaluation
 - DL3DV-ALL-480P (streaming train) — https://huggingface.co/datasets/DL3DV/DL3DV-ALL-480P
+- LaCT stage-1 weights (this repo) — https://huggingface.co/akrao9/VGGT-LACT
