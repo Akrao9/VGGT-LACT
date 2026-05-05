@@ -1,0 +1,7 @@
+VGGT-TTT
+Copyright 2026 Akrao9
+
+This project is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+Portions of model/losses.py adapt helpers from facebook/vggt (Apache-2.0).

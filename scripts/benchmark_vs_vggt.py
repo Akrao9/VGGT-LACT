@@ -7,8 +7,8 @@ DL3DV-Evaluation. Teacher is expected to OOM at long N; student keeps going.
 Usage (streaming from HF — recommended; per-scene tars are ~9 GB):
   python scripts/benchmark_vs_vggt.py \
       --hf_repo DL3DV/DL3DV-Evaluation \
-      --hf_cache /content/_dl3dv_eval_cache \
-      --lact_ckpt /content/drive/MyDrive/vggt_ttt_ckpts/vggt_ttt_lact_stage1.pt \
+      --hf_cache ~/.cache/vggt_ttt/dl3dv_eval \
+      --lact_ckpt /path/to/vggt_ttt_lact_stage1.pt \
       --num_scenes 20 --seq_lens 16,32,48,64,96,128 \
       --json_out bench.json
 
@@ -353,8 +353,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--data_dir", default="", help="Local extracted scenes dir (alternative to --hf_repo).")
     p.add_argument("--hf_repo", default="", help="HF dataset repo to stream (e.g. DL3DV/DL3DV-Evaluation).")
-    p.add_argument("--hf_cache", default="/content/_dl3dv_eval_cache",
-                   help="Local cache for streamed tars (deleted per-scene after benchmark).")
+    p.add_argument(
+        "--hf_cache",
+        default=str(Path.home() / ".cache" / "vggt_ttt" / "dl3dv_eval"),
+        help="Local cache for streamed tars (deleted per-scene after benchmark).",
+    )
     p.add_argument("--lact_ckpt", required=True)
     p.add_argument("--num_scenes", type=int, default=20)
     p.add_argument("--seq_lens", default="16,32,48,64,96,128")

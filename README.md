@@ -9,7 +9,7 @@ A linear-memory drop-in for VGGT's global attention. Replaces the quadratic glob
 - **Cross-chunk fast-weight state** (`w0,w1,w2`) detached between chunks; optional TBPTT window keeps gradients flowing across the last *K* chunks.
 - **Slim checkpoints** (`lact_state_dict()`) — only the trainable LaCT params, ~200 MB.
 
-## Results (DL3DV-Evaluation, 19 scenes)
+## Results (DL3DV-Evaluation, `--num_scenes 20`)
 
 VGGT teacher vs VGGT-TTT student (LaCT, stage-1 distill), Blackwell RTX Pro 6000 96 GB:
 
@@ -28,7 +28,7 @@ VGGT teacher vs VGGT-TTT student (LaCT, stage-1 distill), Blackwell RTX Pro 6000
 
 Crossover is around N≈48: short sequences favor the teacher (well-fused global attention), long sequences favor the student. The story is long-context, not short-burst.
 
-Raw numbers in [`bench.json`](bench.json); reproduce via [`scripts/benchmark_vs_vggt.py`](scripts/benchmark_vs_vggt.py).
+Raw numbers in [`bench.json`](bench.json); reproduce via [`scripts/benchmark_vs_vggt.py`](scripts/benchmark_vs_vggt.py). Each `summary` row’s `n_scenes` is how many scenes contributed at that `N` (default `--num_scenes 20`; fewer if a scene has too few frames or a row is skipped).
 
 ## Architecture
 
@@ -54,20 +54,22 @@ images ── DINOv2 patch embed (frozen) ──┐
 | `model/lact_block.py` | LayerNorm + GLU TTT + residual; padding-aware mini-batch; optional TBPTT |
 | `model/ttt_aggregator.py` | VGGT aggregator with LaCT in place of global attention |
 | `model/vggt_ttt.py` | Top-level model + slim `lact_state_dict()` save/load |
-| `model/io_utils.py` | Safe checkpoint I/O |
-| `model/losses.py` | Distillation + consistency losses |
+| `model/io_utils.py` | Safe checkpoint I/O (`torch_load_checkpoint`) |
+| `model/losses.py` | `distillation_loss` (stage 1) + `consistency_loss` (stage 2) |
 | `pipeline/input_pipeline.py` | Image/video preprocessing |
-| `scripts/script_common.py` | Blackwell-friendly defaults (TF32, fused AdamW, compile guard) |
-| `scripts/run_inference.py` | Inference CLI |
-| `scripts/benchmark_vs_vggt.py` | Teacher-vs-student benchmark with HF streaming |
-| `configs/default.yaml` | Reference defaults (CLI scripts use argparse) |
-
-Training scripts (`finetune.py`, `dl3dv_streaming.py`, `download.py`, `evaluate_stage1.py`) are not included in this public repo; they are data- and infrastructure-specific.
+| `scripts/script_common.py` | CUDA defaults (TF32, fused AdamW, compile guard, AMP helpers) |
+| `scripts/run_inference.py` | Inference CLI (video → poses / depth / points) |
+| `scripts/benchmark_vs_vggt.py` | Teacher vs student: VRAM, latency, depth vs teacher, pose vs GT |
+| `scripts/finetune.py` | Stage 1 distillation or stage 2 consistency training |
+| `scripts/dl3dv_streaming.py` | DL3DV HF tar streaming helpers for `finetune.py` |
+| `scripts/download.py` | DL3DV subset download / listing (Hugging Face) |
+| `scripts/evaluate_stage1.py` | Held-out `distillation_loss` metrics + optional baseline comparison |
+| `configs/default.yaml` | Reference defaults (CLIs use argparse) |
 
 ## Install
 
 ```bash
-git clone https://github.com/<you>/vggt_ttt && cd vggt_ttt
+git clone https://github.com/Akrao9/vggt_ttt && cd vggt_ttt
 pip install -e .
 ```
 
@@ -86,16 +88,19 @@ The slim LaCT checkpoint (~200 MB) is loaded on top of `facebook/VGGT-1B`; every
 
 ## Training (stage 1 distillation)
 
-The LaCT blocks are the only trainable parameters; everything else (DINOv2 patch embed, frame-wise attention, prediction heads) stays frozen at VGGT's pretrained weights. The student learns to mimic the teacher's per-layer aggregated tokens so the frozen heads keep working unchanged.
+The LaCT blocks are the only trainable parameters; everything else (DINOv2 patch embed, frame-wise attention, prediction heads) stays frozen at VGGT's pretrained weights. Stage 1 aligns **student head outputs to the frozen teacher** on the same images so the pretrained heads still see statistics they were built for.
 
 **Setup**
 - Teacher: frozen `facebook/VGGT-1B`, `eval()`, no grad.
 - Student: `VGGT_TTT(teacher, share_frame_blocks=True)` — student reuses the teacher's frame-wise blocks, only the 24 LaCT blocks (replacing global attention) are trainable. LaCT `c_proj` is zero-initialized so the student starts as a near-identity copy of the teacher.
 - Both run on the same GPU; with `share_frame_blocks=True` no weights are duplicated.
 
-**Loss** (per training step on a single video clip):
-- **Token alignment**: cosine + L2 between student `aggregated_tokens_list[ℓ]` and teacher's, at each layer ℓ that any head reads from (`depth_head.intermediate_layer_idx ∪ point_head.intermediate_layer_idx ∪ {last}`). This is the dominant signal — it forces the LaCT path to reconstruct the global-attention output the heads expect.
-- **Head consistency**: small auxiliary terms on the heads themselves — pose (rotation geodesic + translation), depth (L1 in log-space), point (L2). Optional; switched on once token alignment is below a threshold.
+**Loss** — implemented as `distillation_loss` in [`model/losses.py`](model/losses.py) (each term is skipped if the matching key is missing on either side):
+
+- **`pose_enc`**: decomposed **L1** on the camera pose encoding vs the teacher’s `pose_enc`, plus a penalty when the student predicts non-finite values (`finite_camera_distillation_loss`).
+- **`depth` / `world_points`**: **masked L1** vs the teacher on finite entries (`finite_masked_l1_loss`), with the same non-finite penalty pattern.
+
+Weights default to `weight_pose=1`, `weight_depth=1`, `weight_point=0.5`. There is **no** separate token-level cosine/L2 on `aggregated_tokens_list` in this repo’s public loss code.
 
 **Optimization**
 - bf16 autocast in the trunk; heads + pose decoding stay fp32.
@@ -109,20 +114,52 @@ The LaCT blocks are the only trainable parameters; everything else (DINOv2 patch
 - DL3DV-ALL streamed from HuggingFace (one tar at a time, ~9 GB each, deleted after the scene is consumed). Random `seq_len` clip per scene; 32 frames at 518² in stage 1.
 
 **Checkpoints**
-- Only the LaCT params are saved (`model.lact_state_dict()`), ~200 MB. Reload with `model.load_lact_state_dict(state, strict=True)` on top of a fresh `VGGT_TTT.from_pretrained(...)`.
+- Only LaCT weights are saved: call **`lact_state_dict()` on your `VGGT_TTT` instance** (same tensors as `torch.save(model.lact_state_dict(), path)`), ~200 MB. Reload with `model.load_lact_state_dict(state, strict=True)` after `VGGT_TTT.from_pretrained(...)`.
 
-The actual training scripts (`scripts/finetune.py`, `scripts/dl3dv_streaming.py`) are dataset- and infra-specific (Colab + Google Drive checkpointing) and are not included in this repo. The model code above is enough to reproduce: instantiate teacher + student, freeze everything except LaCT, optimize the per-layer token alignment loss, save with `lact_state_dict()`.
+Implementation entry point: [`scripts/finetune.py`](scripts/finetune.py) — stage 1 runs paired teacher/student forwards and **`distillation_loss(student_out, teacher_out)`** (see [`model/losses.py`](model/losses.py)).
+
+### Train (local scenes)
+
+Requires an extracted DL3DV-style tree under `--data_dir` (see dataset docs). HuggingFace login is not required for local paths.
+
+```bash
+python scripts/finetune.py --data_dir /path/to/extracted_scenes --stage 1 --epochs 5 \
+    --save_dir ./checkpoints --chunk_size 16 --seq_len 32
+```
+
+### Train (stream DL3DV-ALL from Hugging Face)
+
+Accept the dataset terms, then `huggingface-cli login`. Downloads one scene tar at a time into `--dl3dv_local_dir` (default: `~/.cache/vggt_ttt/dl3dv_stream`).
+
+```bash
+python scripts/finetune.py --stream_dl3dv --stage 1 --epochs 5 --seq_len 32 \
+    --save_dir ./checkpoints --chunk_size 16 \
+    --dl3dv_resolution 480P --stream_scenes_per_epoch 8
+```
+
+Use `--teacher_device cpu` if GPU memory is tight (slower teacher forward).
+
+### Evaluate (same loss as training)
+
+[`scripts/evaluate_stage1.py`](scripts/evaluate_stage1.py) reports `distillation_loss` scalars on held-out data. `--compare_baseline` adds an untrained-LaCT run on the same clips for a quick “checkpoint vs random” delta.
+
+```bash
+python scripts/evaluate_stage1.py \
+    --data_dir /path/to/DL3DV-Evaluation \
+    --checkpoint ./checkpoints/vggt_ttt_lact_stage1.pt \
+    --compare_baseline --num_scenes 5 --json_out ./eval_stage1.json
+```
 
 ## Benchmark
 
-Streams `DL3DV/DL3DV-Evaluation` from HuggingFace (one ~9 GB tar at a time, deleted after each scene) so you don't need 500 GB of disk:
+Streams [`DL3DV/DL3DV-Evaluation`](https://huggingface.co/datasets/DL3DV/DL3DV-Evaluation) from Hugging Face (one ~9 GB tar at a time, deleted after each scene) so you do not need the full dataset on disk. Default `--hf_cache` is `~/.cache/vggt_ttt/dl3dv_eval`.
 
 ```bash
 huggingface-cli login   # accept terms at huggingface.co/datasets/DL3DV/DL3DV-Evaluation
 
 python scripts/benchmark_vs_vggt.py \
     --hf_repo DL3DV/DL3DV-Evaluation \
-    --hf_cache /tmp/_dl3dv_eval_cache \
+    --hf_cache ~/.cache/vggt_ttt/dl3dv_eval \
     --lact_ckpt /path/to/vggt_ttt_lact_stage1.pt \
     --num_scenes 20 --seq_lens 16,32,48,64,96,128 \
     --json_out bench.json
@@ -134,10 +171,11 @@ Or pass `--data_dir /path/to/extracted` to use a local copy.
 
 ```python
 import torch
+from model.io_utils import torch_load_checkpoint
 from model.vggt_ttt import VGGT_TTT
 
 model = VGGT_TTT.from_pretrained(share_frame_blocks=True, chunk_size=16).cuda().eval()
-state = torch.load("vggt_ttt_lact_stage1.pt", map_location="cuda")
+state = torch_load_checkpoint("vggt_ttt_lact_stage1.pt", map_location="cuda")
 model.load_lact_state_dict(state, strict=True)
 
 with torch.no_grad(), torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -146,10 +184,15 @@ with torch.no_grad(), torch.amp.autocast(device_type="cuda", dtype=torch.bfloat1
 ```
 
 Notes:
+- Prefer **`torch_load_checkpoint`** from [`model/io_utils.py`](model/io_utils.py) over raw `torch.load` so checkpoints use **`weights_only=True`** when the PyTorch version supports it.
 - `share_frame_blocks=True` reuses the teacher's frozen frame blocks (no duplicate weights, ~2 GB saved).
 - `reset_memory()` clears the LaCT fast-weight state between scenes; the model carries scene state across chunks within a single forward.
 - Heads run in fp32; the rest runs in bf16 under autocast.
 - `--grad_ckpt` only needed beyond ~128 frames at 518².
+
+## License
+
+This project is released under the **Apache License, Version 2.0**. The full text is in [`LICENSE`](LICENSE); copyright and third-party notes are in [`NOTICE`](NOTICE). Some modules cite upstream code (e.g. loss helpers adapted from [VGGT](https://github.com/facebookresearch/vggt), Apache-2.0).
 
 ## References
 
@@ -157,3 +200,4 @@ Notes:
 - LaCT — https://github.com/a1600012888/LaCT
 - tttLRM — https://cwchenwang.github.io/tttLRM/
 - DL3DV-Evaluation — https://huggingface.co/datasets/DL3DV/DL3DV-Evaluation
+- DL3DV-ALL-480P (streaming train) — https://huggingface.co/datasets/DL3DV/DL3DV-ALL-480P
