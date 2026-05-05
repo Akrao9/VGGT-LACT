@@ -19,5 +19,8 @@ dependencies = [
   "piq",
 ]
 
+[project.urls]
+Repository = "https://github.com/Akrao9/VGGT-LACT"
+
 [tool.setuptools]
 packages = ["model", "pipeline"]

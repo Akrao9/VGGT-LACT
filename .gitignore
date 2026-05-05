@@ -14,6 +14,9 @@ __pycache__/
 vggtttt_*_out/
 vggtttt_*_decoder*/
 
+# Hugging Face Hub model-card mirror (optional local only; not in git)
+/huggingface/
+
 # Large model artifacts
 *.pt
 *.pth
