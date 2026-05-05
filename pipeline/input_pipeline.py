@@ -9,6 +9,7 @@ Handles:
 """
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -152,12 +153,14 @@ def prepare_input(
     """
     video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 
+    temp_frame_dir: Optional[str] = None
     if isinstance(source, str):
         ext = Path(source).suffix.lower()
         if ext in video_extensions:
-            # Extract frames first
+            # Extract frames into a temp dir we own and will clean up after load.
+            temp_frame_dir = tempfile.mkdtemp(prefix="vggt_ttt_frames_")
             image_paths = extract_frames_from_video(
-                source, fps=fps, max_frames=max_frames
+                source, fps=fps, max_frames=max_frames, output_dir=temp_frame_dir,
             )
         else:
             # Single image
@@ -166,7 +169,11 @@ def prepare_input(
         image_paths = source
 
     print(f"Loading {len(image_paths)} frames...")
-    frames = load_images(image_paths, target_size=target_size)  # (N, 3, H, W)
+    try:
+        frames = load_images(image_paths, target_size=target_size)  # (N, 3, H, W)
+    finally:
+        if temp_frame_dir is not None:
+            shutil.rmtree(temp_frame_dir, ignore_errors=True)
 
     # Add batch dimension
     frames = frames.unsqueeze(0)  # (1, N, 3, H, W)

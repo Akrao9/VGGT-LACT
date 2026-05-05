@@ -16,27 +16,7 @@ input:
   fps: 2.0
   max_frames: 300
 
-train_stage1:
-  epochs: 5
-  lr: 1.0e-4
-  batch_size: 1
-  seq_len: 32
-  grad_accum_steps: 1  # finetune.py; does not lower peak VRAM per forward—SDP/allocator via configure_cuda_backend
-  precision: bf16
-  num_workers_local: 16
-  num_workers_stream: 8
-
-train_stage2:
-  epochs: 10
-  lr: 5.0e-5
-  batch_size: 1
-  seq_len: 96
-  grad_accum_steps: 1  # same VRAM note as train_stage1
-  precision: bf16
-
-decoder:
-  hidden_dim: 256
-  virtual_grid: 24
-  n_source: 16
-  n_target: 4
-  lr: 2.0e-4
+benchmark:
+  seq_lens: [16, 32, 48, 64, 96, 128]
+  num_scenes: 20
+  chunk_size: 16

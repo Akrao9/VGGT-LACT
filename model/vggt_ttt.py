@@ -109,8 +109,12 @@ class VGGT_TTT(nn.Module):
         strict_heads: bool = True,
         reset_memory: bool = True,
         virtual_tokens: Optional[torch.Tensor] = None,
+        skip_heads: Optional[set] = None,
     ) -> Dict[str, Any]:
+        """skip_heads: subset of {'camera','depth','point'} to bypass — saves VRAM
+        when downstream losses don't need that head's outputs."""
         chunk_size = chunk_size or self.chunk_size
+        skip_heads = set(skip_heads) if skip_heads else set()
         keep = self._heads_keep_indices()
 
         result = self.aggregator(
@@ -135,24 +139,27 @@ class VGGT_TTT(nn.Module):
         tokens_fp32 = _aggregated_tokens_for_heads(aggregated_tokens_list, target_dtype=head_dtype)
         images_for_heads = images if images.dtype == head_dtype else images.to(head_dtype)
         with torch.amp.autocast(device_type=images.device.type, enabled=False):
-            try:
-                from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-                pose_enc = self.camera_head(tokens_fp32)[-1]
-                # pose decode involves quaternion math + small matrix inverses; force fp32
-                # so bf16 heads don't degrade extrinsic/intrinsic numerics.
-                extr, intr = pose_encoding_to_extri_intri(pose_enc.float(), images.shape[-2:])
-                outputs.update(extrinsic=extr, intrinsic=intr, pose_enc=pose_enc)
-            except Exception as e: handle("Camera", e)
+            if "camera" not in skip_heads:
+                try:
+                    from vggt.utils.pose_enc import pose_encoding_to_extri_intri
+                    pose_enc = self.camera_head(tokens_fp32)[-1]
+                    # pose decode involves quaternion math + small matrix inverses; force fp32
+                    # so bf16 heads don't degrade extrinsic/intrinsic numerics.
+                    extr, intr = pose_encoding_to_extri_intri(pose_enc.float(), images.shape[-2:])
+                    outputs.update(extrinsic=extr, intrinsic=intr, pose_enc=pose_enc)
+                except Exception as e: handle("Camera", e)
 
-            try:
-                d, dc = self.depth_head(tokens_fp32, images=images_for_heads, patch_start_idx=ps_idx)
-                outputs.update(depth=d, depth_conf=dc)
-            except Exception as e: handle("Depth", e)
+            if "depth" not in skip_heads:
+                try:
+                    d, dc = self.depth_head(tokens_fp32, images=images_for_heads, patch_start_idx=ps_idx)
+                    outputs.update(depth=d, depth_conf=dc)
+                except Exception as e: handle("Depth", e)
 
-            try:
-                wp, wpc = self.point_head(tokens_fp32, images=images_for_heads, patch_start_idx=ps_idx)
-                outputs.update(world_points=wp, world_points_conf=wpc)
-            except Exception as e: handle("Point", e)
+            if "point" not in skip_heads:
+                try:
+                    wp, wpc = self.point_head(tokens_fp32, images=images_for_heads, patch_start_idx=ps_idx)
+                    outputs.update(world_points=wp, world_points_conf=wpc)
+                except Exception as e: handle("Point", e)
 
         if return_tokens:
             outputs["aggregated_tokens_list"] = aggregated_tokens_list

@@ -19,3 +19,9 @@ vggtttt_*_decoder*/
 *.pth
 *.ckpt
 *.safetensors
+
+# Training-side scripts (kept locally, not pushed)
+scripts/finetune.py
+scripts/evaluate_stage1.py
+scripts/dl3dv_streaming.py
+scripts/download.py

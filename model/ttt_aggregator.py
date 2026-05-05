@@ -235,7 +235,9 @@ class TTTAggregator(nn.Module):
                     fw_in = tokens
                     pos_fw = pos_frame
 
-                if self.training and self.gradient_checkpoint and fw_in.requires_grad:
+                # Do not require ``self.training``: decoder training keeps the trunk in ``eval()`` while
+                # still backpropping through activations; checkpointing must still run when requested.
+                if self.gradient_checkpoint and fw_in.requires_grad:
                     fw_out = checkpoint(fw, fw_in, pos_fw, use_reentrant=self.use_reentrant)
                 else:
                     fw_out = fw(fw_in, pos=pos_fw)

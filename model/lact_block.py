@@ -115,7 +115,8 @@ class LaCTBlock(nn.Module):
         }
         # gradient checkpoint at the GLU boundary: state mutation happens *after* and
         # is unaffected; the recompute observes the same shape_info captured here.
-        if self.gradient_checkpoint and self.training and x_pad.requires_grad:
+        # Decoder training may run the trunk in ``eval()`` while still needing checkpointed LaCT backward.
+        if self.gradient_checkpoint and x_pad.requires_grad:
             from torch.utils.checkpoint import checkpoint as _ckpt
             def _run(xp, si):
                 return self.glu(xp, shape_info=si)

@@ -53,7 +53,8 @@ def silu_backprop(dy: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
     assert G.ndim == 3
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16() if G.dtype != torch.bfloat16 else G.float()
+    # Muon NS-5 runs in bf16 for speed; convert if needed, leave alone if already bf16.
+    X = G if G.dtype == torch.bfloat16 else G.bfloat16()
     transposed = G.size(1) > G.size(2)
     if transposed:
         X = X.transpose(1, 2)
@@ -136,7 +137,8 @@ def fast_weight_swish_glu_weight_norm_mini_batch_apply(
 
         if apply:
             qi = q[:, start:end, :]
-            oi = (F.silu(qi @ w0_now, inplace=True) * (qi @ w2_now)) @ w1_now
+            # No inplace silu: the input (qi @ w0_now) is needed for backward.
+            oi = (F.silu(qi @ w0_now) * (qi @ w2_now)) @ w1_now
             output.append(oi)
 
     return torch.cat(output, dim=1), w0, w1, w2
