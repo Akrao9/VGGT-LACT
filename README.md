@@ -71,7 +71,7 @@ images ── DINOv2 patch embed (frozen) ──┐
 ## Install
 
 ```bash
-git clone https://github.com/Akrao9/vggt_ttt && cd vggt_ttt
+git clone https://github.com/Akrao9/VGGT-LACT && cd VGGT-LACT
 pip install -e .
 ```
 
